@@ -13,6 +13,7 @@ public class EnginePanel extends JPanel implements Runnable {
     private List<Wall> walls = new ArrayList<>();
     private List<Vector2D> pockets = new ArrayList<>();
     private Vector2D gravity = new Vector2D(0, 0);
+    private Hoop basketballHoop; 
 
     private final int POCKET_RADIUS = 32; 
 
@@ -23,11 +24,10 @@ public class EnginePanel extends JPanel implements Runnable {
     private double angle = 0.0;
     private int score = 0;
 
-    // UI Buttons
     private Rectangle btnBilliards = new Rectangle(800, 20, 150, 40);
     private Rectangle btnBasketball = new Rectangle(800, 70, 150, 40);
     private Rectangle btnReset = new Rectangle(800, 120, 150, 40);
-    private Rectangle btnMenu = new Rectangle(800, 170, 150, 40); // The Main Menu Button
+    private Rectangle btnMenu = new Rectangle(800, 170, 150, 40);
 
     private Main parentFrame;
 
@@ -45,7 +45,7 @@ public class EnginePanel extends JPanel implements Runnable {
                     else loadBasketballScene();
                 }
                 else if (btnMenu.contains(e.getPoint())) {
-                    parentFrame.showMenu(); // Tells Main.java to switch screens!
+                    parentFrame.showMenu(); 
                 }
 
                 if (activeBall != null) {
@@ -85,7 +85,6 @@ public class EnginePanel extends JPanel implements Runnable {
                     if (launchVel.mag() > 30) launchVel.mult(30 / launchVel.mag());
                     
                     activeBall.vel.set(launchVel.x, launchVel.y);
-                    if (currentScene == Scene.BASKETBALL) score++; 
                 }
             }
         };
@@ -95,7 +94,6 @@ public class EnginePanel extends JPanel implements Runnable {
         new Thread(this).start();
     }
 
-    // --- SCENES (Public so MainMenu can access them) ---
     public void loadBilliardsScene() {
         currentScene = Scene.BILLIARDS;
         balls.clear(); walls.clear(); pockets.clear();
@@ -144,17 +142,22 @@ public class EnginePanel extends JPanel implements Runnable {
         gravity.set(0, 0.4); 
         score = 0;
 
+        // Static Environment
         walls.add(new Wall(0, 600, 1000, 100, new Color(210, 180, 140))); 
         walls.add(new Wall(800, 250, 10, 350, new Color(50, 50, 50))); 
         walls.add(new Wall(790, 200, 10, 150, Color.BLACK)); 
-        walls.add(new Wall(710, 300, 80, 10, new Color(220, 50, 30))); 
-        walls.add(new Wall(700, 295, 10, 10, Color.RED)); 
+
+        // The Graphics and Scoring Logic Hoop
+        basketballHoop = new Hoop(720, 300, 70, 10);
+
+        // THE FIX: Set the physics colliders to 100% transparent (0,0,0,0)
+        balls.add(new Ball(715, 290, 6, Double.POSITIVE_INFINITY, new Color(0, 0, 0, 0))); 
+        balls.add(new Ball(795, 290, 6, Double.POSITIVE_INFINITY, new Color(0, 0, 0, 0))); 
 
         activeBall = new Ball(200, 500, 20, 1.5, new Color(255, 140, 0));
         balls.add(activeBall);
     }
 
-    // --- PHYSICS ENGINE ---
     @Override
     public void run() {
         while (true) {
@@ -165,20 +168,27 @@ public class EnginePanel extends JPanel implements Runnable {
     }
 
     private void updatePhysics() {
+        // ALWAYS run the cloth simulation so the net sways even while aiming
+        if (currentScene == Scene.BASKETBALL && basketballHoop != null) {
+            basketballHoop.simulateNet(activeBall);
+        }
+
         Iterator<Ball> iter = balls.iterator();
         while (iter.hasNext()) {
             Ball b = iter.next();
             if (isAiming && b == activeBall) continue; 
             
-            b.vel.add(gravity);
-            b.pos.add(b.vel);
-            
-            if (currentScene == Scene.BILLIARDS) b.vel.mult(0.985); 
-            else b.vel.mult(0.995); 
+            if (b.mass != Double.POSITIVE_INFINITY) {
+                b.vel.add(gravity);
+                b.pos.add(b.vel);
+                
+                if (currentScene == Scene.BILLIARDS) b.vel.mult(0.985); 
+                else b.vel.mult(0.995); 
 
-            if (b.vel.mag() > 35) b.vel.mult(35 / b.vel.mag());
+                if (b.vel.mag() > 35) b.vel.mult(35 / b.vel.mag());
+            }
 
-            if (currentScene == Scene.BILLIARDS) {
+            if (currentScene == Scene.BILLIARDS && b.mass != Double.POSITIVE_INFINITY) {
                 boolean pocketed = false;
                 for (Vector2D p : pockets) {
                     if (Vector2D.sub(b.pos, p).mag() < POCKET_RADIUS) { 
@@ -196,22 +206,40 @@ public class EnginePanel extends JPanel implements Runnable {
                 if (pocketed) continue; 
             }
 
-            int pad = (int)b.radius;
-            int minX = pad, maxX = 1000 - pad;
-            int minY = pad, maxY = 700 - pad;
-            
-            if (currentScene == Scene.BILLIARDS) {
-                minX = 120 + pad; maxX = 880 - pad; 
-                minY = 120 + pad; maxY = 580 - pad;
+            if (currentScene == Scene.BASKETBALL && b == activeBall) {
+                if (basketballHoop.checkScore(b)) {
+                    score += 1; 
+                    b.pos.set(200, 500); 
+                    b.vel.set(0, 0);
+                }
             }
 
-            if (b.pos.x < minX) { b.pos.x = minX; b.vel.x *= -0.6; }
-            if (b.pos.x > maxX) { b.pos.x = maxX; b.vel.x *= -0.6; }
-            if (b.pos.y < minY) { b.pos.y = minY; b.vel.y *= -0.6; }
-            if (b.pos.y > maxY) { b.pos.y = maxY; b.vel.y *= -0.6; }
+            int pad = (int)b.radius;
+            if (currentScene == Scene.BILLIARDS && b.mass != Double.POSITIVE_INFINITY) {
+                boolean nearPocket = false;
+                for (Vector2D p : pockets) {
+                    if (Vector2D.sub(b.pos, p).mag() < POCKET_RADIUS + 30) {
+                        nearPocket = true; break;
+                    }
+                }
+                if (!nearPocket) {
+                    int minX = 150 + pad, maxX = 850 - pad; 
+                    int minY = 150 + pad, maxY = 550 - pad;
+                    if (b.pos.x < minX) { b.pos.x = minX; b.vel.x *= -0.8; }
+                    if (b.pos.x > maxX) { b.pos.x = maxX; b.vel.x *= -0.8; }
+                    if (b.pos.y < minY) { b.pos.y = minY; b.vel.y *= -0.8; }
+                    if (b.pos.y > maxY) { b.pos.y = maxY; b.vel.y *= -0.8; }
+                }
+            } else if (currentScene == Scene.BASKETBALL) {
+                if (b.pos.x < pad) { b.pos.x = pad; b.vel.x *= -0.8; }
+                if (b.pos.x > 1000 - pad) { b.pos.x = 1000 - pad; b.vel.x *= -0.8; }
+                if (b.pos.y < pad) { b.pos.y = pad; b.vel.y *= -0.8; }
+                if (b.pos.y > 700 - pad) { b.pos.y = 700 - pad; b.vel.y *= -0.8; }
+            }
         }
 
         for (Ball b : balls) {
+            if (b.mass == Double.POSITIVE_INFINITY) continue;
             for (Wall w : walls) {
                 double closestX = Math.max(w.x, Math.min(b.pos.x, w.x + w.width));
                 double closestY = Math.max(w.y, Math.min(b.pos.y, w.y + w.height));
@@ -253,8 +281,8 @@ public class EnginePanel extends JPanel implements Runnable {
                     Vector2D normal = new Vector2D(delta.x / dist, delta.y / dist);
                     double overlap = 0.5 * (min_dist - dist);
                     
-                    b1.pos.x += normal.x * overlap; b1.pos.y += normal.y * overlap;
-                    b2.pos.x -= normal.x * overlap; b2.pos.y -= normal.y * overlap;
+                    if (b1.mass != Double.POSITIVE_INFINITY) { b1.pos.x += normal.x * overlap; b1.pos.y += normal.y * overlap; }
+                    if (b2.mass != Double.POSITIVE_INFINITY) { b2.pos.x -= normal.x * overlap; b2.pos.y -= normal.y * overlap; }
 
                     Vector2D relVel = Vector2D.sub(b1.vel, b2.vel);
                     double velAlongNormal = (relVel.x * normal.x) + (relVel.y * normal.y);
@@ -267,14 +295,13 @@ public class EnginePanel extends JPanel implements Runnable {
 
                     Vector2D impulse = new Vector2D(normal.x * jImpulse, normal.y * jImpulse);
                     
-                    b1.vel.x += impulse.x / b1.mass; b1.vel.y += impulse.y / b1.mass;
-                    b2.vel.x -= impulse.x / b2.mass; b2.vel.y -= impulse.y / b2.mass;
+                    if (b1.mass != Double.POSITIVE_INFINITY) { b1.vel.x += impulse.x / b1.mass; b1.vel.y += impulse.y / b1.mass; }
+                    if (b2.mass != Double.POSITIVE_INFINITY) { b2.vel.x -= impulse.x / b2.mass; b2.vel.y -= impulse.y / b2.mass; }
                 }
             }
         }
     }
 
-    // --- GRAPHICS ---
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -292,6 +319,8 @@ public class EnginePanel extends JPanel implements Runnable {
             for (Vector2D p : pockets) {
                 g2d.fillOval((int)p.x - POCKET_RADIUS, (int)p.y - POCKET_RADIUS, POCKET_RADIUS * 2, POCKET_RADIUS * 2);
             }
+        } else if (currentScene == Scene.BASKETBALL && basketballHoop != null) {
+            basketballHoop.draw(g2d); 
         }
 
         for (Wall w : walls) {
@@ -304,12 +333,15 @@ public class EnginePanel extends JPanel implements Runnable {
         for (Ball b : balls) {
             g2d.setColor(b.color);
             g2d.fillOval((int)(b.pos.x - b.radius), (int)(b.pos.y - b.radius), (int)b.radius * 2, (int)b.radius * 2);
-            g2d.setColor(Color.BLACK);
-            g2d.drawOval((int)(b.pos.x - b.radius), (int)(b.pos.y - b.radius), (int)b.radius * 2, (int)b.radius * 2);
             
-            if (currentScene == Scene.BILLIARDS && b.color != Color.WHITE) {
-                g2d.setColor(Color.WHITE);
-                g2d.fillOval((int)(b.pos.x - b.radius/2), (int)(b.pos.y - b.radius/2), 6, 6);
+            if (b.mass != Double.POSITIVE_INFINITY) {
+                g2d.setColor(Color.BLACK);
+                g2d.drawOval((int)(b.pos.x - b.radius), (int)(b.pos.y - b.radius), (int)b.radius * 2, (int)b.radius * 2);
+                
+                if (currentScene == Scene.BILLIARDS && b.color != Color.WHITE) {
+                    g2d.setColor(Color.WHITE);
+                    g2d.fillOval((int)(b.pos.x - b.radius/2), (int)(b.pos.y - b.radius/2), 6, 6);
+                }
             }
         }
 
@@ -361,7 +393,7 @@ public class EnginePanel extends JPanel implements Runnable {
                         if (ghostPos.x <= 165 || ghostPos.x >= 835 || ghostPos.y <= 165 || ghostPos.y >= 535) break;
 
                         for (Ball b : balls) {
-                            if (b == activeBall) continue; 
+                            if (b == activeBall || b.mass == Double.POSITIVE_INFINITY) continue; 
                             if (Vector2D.sub(ghostPos, b.pos).mag() <= activeBall.radius + b.radius) {
                                 hitBall = b;
                                 break;
