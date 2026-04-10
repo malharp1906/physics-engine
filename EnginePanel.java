@@ -209,8 +209,8 @@ public class EnginePanel extends JPanel implements Runnable {
             if (currentScene == Scene.BASKETBALL && b == activeBall) {
                 if (basketballHoop.checkScore(b)) {
                     score += 1; 
-                    b.pos.set(200, 500); 
-                    b.vel.set(0, 0);
+                    // b.pos.set(200, 500); 
+                    // b.vel.set(0, 0);
                 }
             }
 
